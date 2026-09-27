@@ -1,0 +1,22 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: manga-rec-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: manga
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: mangarec
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U manga -d mangarec"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

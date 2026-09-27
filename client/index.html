@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MangaMatch — Personalised Manga Recommendations</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header class="header">
+        <div class="header-inner">
+            <div class="logo">
+                <span class="logo-mark">M</span>
+                <span class="logo-text">MangaMatch</span>
+            </div>
+            <p class="tagline">Personalised recommendations powered by your AniList history</p>
+            <form class="search-form" id="searchForm">
+                <div class="search-row">
+                    <input type="text"
+                           id="usernameInput"
+                           class="search-input"
+                           placeholder="Your AniList username"
+                           autocomplete="off"
+                           spellcheck="false"
+                           maxlength="64">
+                    <button type="submit" class="search-btn" id="searchBtn">
+                        <span class="btn-text">Recommend</span>
+                        <span class="btn-spinner hidden" aria-hidden="true"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </header>
+
+    <main class="main">
+        <div id="emptyState" class="empty-state">
+            <p>Enter your AniList username above to discover manga you'll love</p>
+        </div>
+
+        <div id="errorState" class="error-state hidden">
+            <p id="errorMessage"></p>
+        </div>
+
+        <section id="resultsSection" class="results-section hidden">
+            <div class="results-meta">
+                <h2 id="resultsTitle" class="results-title"></h2>
+                <p id="resultsMeta" class="results-subtitle"></p>
+            </div>
+            <div id="resultsGrid" class="results-grid"></div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>Data sourced from <a href="https://anilist.co" target="_blank" rel="noopener noreferrer">AniList</a></p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

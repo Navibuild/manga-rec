@@ -1,0 +1,24 @@
+{
+  "name": "manga-rec",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+  "start": "node src/api/index.js",
+  "crawl": "node src/anilist/crawl.js",
+  "parse": "node src/ingest/parse.js",
+  "normalise": "node src/ingest/normalise.js",
+  "similarity": "node src/ingest/similarity.js",
+  "eval": "node src/eval/evaluate.js"
+},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^18.0.3",
+    "express": "^5.2.1",
+    "pg": "^8.23.0"
+  }
+  
+}
