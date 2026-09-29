@@ -5,13 +5,13 @@ const path = require('path');
 
 const { recommend } = require('../recommend/profile');
 const { applyDisplayScores } = require('../recommend/score');
+const pool = require('../db/pool');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ---- In-memory cache: avoids hammering AniList on repeat lookups
 const cache = new Map();
-const TTL_MS = 30 * 60 * 1000; // 30 minutes
+const TTL_MS = 30 * 60 * 1000;
 
 function cacheGet(key) {
     const hit = cache.get(key);
@@ -23,13 +23,10 @@ function cacheSet(key, data) {
     cache.set(key, { data, exp: Date.now() + TTL_MS });
 }
 
-// ---- Static frontend
 app.use(express.static(path.join(__dirname, '../../client')));
 
-// ---- Health check (useful for deployment later)
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-// ---- Core recommendation endpoint
 app.get('/api/recommend/:username', async (req, res) => {
     const username = req.params.username.trim();
     if (!username) {
@@ -41,7 +38,7 @@ app.get('/api/recommend/:username', async (req, res) => {
     if (cached) return res.json({ ...cached, cached: true });
 
     try {
-        const raw = await recommend(username);
+        const raw = await recommend(username, pool);
         const results = applyDisplayScores(raw);
         const payload = {
             username,
@@ -66,7 +63,6 @@ app.get('/api/recommend/:username', async (req, res) => {
     }
 });
 
-// ---- SPA fallback (keeps future client-side routing working)
 app.get('/{*path}', (_req, res) => {
     res.sendFile(path.join(__dirname, '../../client/index.html'));
 });

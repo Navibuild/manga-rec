@@ -90,10 +90,52 @@ function showResults(data) {
 }
 
 // ---- Fetch --------------------------------------------------
+const ANILIST_ENDPOINT = 'https://graphql.anilist.co';
+
+const USER_LIST_QUERY = `
+query ($username: String) {
+  User(name: $username) {
+    name
+    mediaListOptions { scoreFormat }
+  }
+  MediaListCollection(userName: $username, type: MANGA) {
+    lists {
+      entries {
+        mediaId
+        score
+        status
+      }
+    }
+  }
+}`;
+
+async function fetchAniListUserData(username) {
+    const res = await fetch(ANILIST_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ query: USER_LIST_QUERY, variables: { username } }),
+    });
+    const data = await res.json();
+    if (data.errors?.length) throw new Error(data.errors[0].message);
+    if (!data.data?.User) throw new Error(`User "${username}" not found on AniList`);
+    if (!data.data?.MediaListCollection) throw new Error(`${username}'s list is private`);
+    const scoreFormat = data.data.User.mediaListOptions?.scoreFormat || 'POINT_10';
+    const entries = data.data.MediaListCollection.lists.flatMap(l => l.entries).filter(Boolean);
+    return { username: data.data.User.name, scoreFormat, entries };
+}
+
 async function fetchRecommendations(username) {
     setLoading(true);
     try {
-        const res = await fetch(`/api/recommend/${encodeURIComponent(username)}`);
+        // Step 1: fetch user list directly from AniList (browser → AniList, no Worker involved)
+        const userData = await fetchAniListUserData(username);
+
+        // Step 2: send to our Worker which only does Postgres queries
+        const res = await fetch('/api/recommend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userData),
+        });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Something went wrong — please try again.');
         showResults(data);

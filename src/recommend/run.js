@@ -5,6 +5,7 @@ const { recommend } = require('./profile');
 const { applyDisplayScores } = require('./score');
 
 async function main() {
+    const raw = await recommend(username, pool);
     const username = process.argv[2];
     if (!username) {
         console.error('Usage: node src/recommend/run.js <AniList username>');

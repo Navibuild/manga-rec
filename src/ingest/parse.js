@@ -4,11 +4,8 @@ const path = require('path');
 const zlib = require('zlib');
 
 require('dotenv').config();
-const pool = require('../db/pool');
 const CONFIG = require('../config');
 
-// AniList occasionally leaves HTML entities/tags in descriptions
-// even with asHtml:false
 function stripHtml(str) {
     if (!str) return null;
     return str
@@ -34,8 +31,7 @@ function readGzip(filePath) {
 }
 
 async function ingestPage(client, mediaList) {
-    // ---- 1. Collect unique tags and genres across the whole page ----
-    const tagMap = new Map(); // tag.id -> tag
+    const tagMap = new Map();
     const genreNames = new Set();
 
     for (const m of mediaList) {
@@ -43,7 +39,6 @@ async function ingestPage(client, mediaList) {
         for (const g of (m.genres || [])) genreNames.add(g);
     }
 
-    // ---- 2. Batch-upsert tags ----
     if (tagMap.size > 0) {
         const arr = [...tagMap.values()];
         await client.query(
@@ -65,7 +60,6 @@ async function ingestPage(client, mediaList) {
         );
     }
 
-    // ---- 3. Batch-upsert genres, then load the name→id map ----
     let genreIdMap = {};
     if (genreNames.size > 0) {
         const names = [...genreNames];
@@ -80,14 +74,12 @@ async function ingestPage(client, mediaList) {
         genreIdMap = Object.fromEntries(rows.map(r => [r.name, r.id]));
     }
 
-    // ---- 4. Wipe junction rows for this batch before re-inserting ----
     const ids = mediaList.map(m => m.id);
     await client.query(`DELETE FROM media_tags             WHERE media_id   = ANY($1)`, [ids]);
     await client.query(`DELETE FROM media_genres           WHERE media_id   = ANY($1)`, [ids]);
     await client.query(`DELETE FROM media_relations        WHERE source_id  = ANY($1)`, [ids]);
     await client.query(`DELETE FROM media_recommendations  WHERE source_id  = ANY($1)`, [ids]);
 
-    // ---- 5. Per-title upserts ----
     for (const m of mediaList) {
         await client.query(
             `INSERT INTO media (
@@ -149,8 +141,6 @@ async function ingestPage(client, mediaList) {
             ]
         );
 
-        // media_tags — store everything including spoiler flags;
-        // M2 will decide which to drop during normalisation
         for (const tag of (m.tags || [])) {
             await client.query(
                 `INSERT INTO media_tags
@@ -163,7 +153,6 @@ async function ingestPage(client, mediaList) {
             );
         }
 
-        // media_genres
         for (const name of (m.genres || [])) {
             const gid = genreIdMap[name];
             if (!gid) continue;
@@ -174,7 +163,6 @@ async function ingestPage(client, mediaList) {
             );
         }
 
-        // media_relations — target may be outside your corpus, that's fine
         for (const edge of (m.relations?.edges || [])) {
             if (!edge?.node?.id || !edge.relationType) continue;
             await client.query(
@@ -186,7 +174,6 @@ async function ingestPage(client, mediaList) {
             );
         }
 
-        // media_recommendations (your M6 ground truth)
         for (const edge of (m.recommendations?.edges || [])) {
             const rec = edge?.node?.mediaRecommendation;
             if (!rec?.id) continue;
@@ -201,43 +188,79 @@ async function ingestPage(client, mediaList) {
 }
 
 async function main() {
+    const { Client } = require('pg');
+    const PROGRESS_FILE = './data/parse-progress.json';
+
     const files = getFiles();
     if (!files.length) {
         console.error('[parse] no files found in', CONFIG.RAW_DIR);
         process.exit(1);
     }
 
-    console.log(`[parse] ${files.length} pages to ingest`);
+    // Load progress: set of already-completed page indices
+    let done = new Set();
+    if (fs.existsSync(PROGRESS_FILE)) {
+        try {
+            done = new Set(JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8')));
+            console.log(`[parse] resuming — ${done.size} pages already completed`);
+        } catch { done = new Set(); }
+    }
+
+    const remaining = files.filter((_, i) => !done.has(i));
+    console.log(`[parse] ${remaining.length} pages remaining of ${files.length}`);
+
     const t0 = Date.now();
     let total = 0;
 
-    for (let i = 0; i < files.length; i++) {
-        const data = readGzip(files[i]);
-        const media = data.Page?.media || [];
-        if (!media.length) continue;
+    for (let fi = 0; fi < files.length; fi++) {
+        if (done.has(fi)) continue;
 
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-            await ingestPage(client, media);
-            await client.query('COMMIT');
-            total += media.length;
-        } catch (err) {
-            await client.query('ROLLBACK');
-            console.error(`\n[parse] ROLLBACK on ${path.basename(files[i])}:`, err.message);
-            throw err;
-        } finally {
-            client.release();
+        const data = readGzip(files[fi]);
+        const media = data.Page?.media || [];
+        if (!media.length) {
+            done.add(fi);
+            continue;
         }
 
-        process.stdout.write(`\r[parse] ${i + 1}/${files.length} pages -- ${total} titles`);
+        // Retry up to 3 times on connection errors
+        let attempts = 0;
+        while (true) {
+            const client = new Client({ connectionString: CONFIG.DATABASE_URL });
+            try {
+                await client.connect();
+                await client.query('BEGIN');
+                await ingestPage(client, media);
+                await client.query('COMMIT');
+                await client.end();
+
+                total += media.length;
+                done.add(fi);
+
+                // Persist progress after every successful page
+                fs.writeFileSync(PROGRESS_FILE, JSON.stringify([...done]));
+                console.log(`[parse] ${fi + 1}/${files.length} pages -- ${total} titles`);
+                break;
+
+            } catch (err) {
+                try { await client.end(); } catch { }
+                attempts++;
+                if (attempts >= 3) {
+                    console.error(`\n[parse] failed page ${fi + 1} after 3 attempts:`, err.message);
+                    throw err;
+                }
+                console.warn(`\n[parse] connection error on page ${fi + 1}, retrying (${attempts}/3)...`);
+                await new Promise(r => setTimeout(r, 3000 * attempts));
+            }
+        }
     }
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     console.log(`\n[parse] done in ${elapsed}s`);
 
-    // Quick sanity counts
-    const { rows: [c] } = await pool.query(`
+    // Summary counts
+    const summary = new Client({ connectionString: CONFIG.DATABASE_URL });
+    await summary.connect();
+    const { rows: [c] } = await summary.query(`
     SELECT
       (SELECT count(*)::int FROM media)                 AS media,
       (SELECT count(*)::int FROM tags)                  AS tags,
@@ -247,9 +270,11 @@ async function main() {
       (SELECT count(*)::int FROM media_relations)       AS relations,
       (SELECT count(*)::int FROM media_recommendations) AS recommendations
   `);
+    await summary.end();
     console.table(c);
 
-    await pool.end();
+    // Clean up progress file on full completion
+    if (fs.existsSync(PROGRESS_FILE)) fs.unlinkSync(PROGRESS_FILE);
 }
 
 main().catch(err => {

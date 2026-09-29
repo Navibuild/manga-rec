@@ -3,3 +3,4 @@ data/
 .env
 .vs/
 *.log
+data/parse-progress.json
