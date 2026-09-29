@@ -1,10 +1,10 @@
-# MangaMatch
+# Personal Recommendation Machine
 
 Personalised manga recommendations powered by your AniList reading history.
 
 Enter your AniList username and get up to 50 ranked recommendations, each with a match percentage and an explanation of which title in your library drove the suggestion.
 
-**[Live demo →](https://github.com/Navibuild/manga-rec)**
+**[Live demo →](https://manga-rec.arnavhbal.workers.dev)**
 
 ---
 
@@ -39,11 +39,11 @@ Tag similarity with IDF weighting finds correct recommendations at more than **d
 
 ## Stack
 
-- **Backend** — Node.js, Express
-- **Database** — PostgreSQL (Neon in production)
+- **Backend** — Node.js, Express (local), Hono (Cloudflare Workers)
+- **Database** — PostgreSQL via Neon
 - **Data** — AniList GraphQL API (no scraping, no third-party wrappers)
 - **Frontend** — vanilla HTML / CSS / JS, no build step
-- **Deployment** — Cloudflare Pages / Workers
+- **Deployment** — Cloudflare Workers
 
 ---
 
@@ -52,7 +52,7 @@ Tag similarity with IDF weighting finds correct recommendations at more than **d
 ### Prerequisites
 
 - Node.js 18+
-- PostgreSQL 14+ (pgvector optional — not used in production)
+- PostgreSQL 14+
 
 ### Setup
 
@@ -128,11 +128,11 @@ manga-rec/
 │   └── init/           # Schema — applied once on fresh DB
 ├── src/
 │   ├── anilist/        # GraphQL client, rate limiter, crawl loop, user list fetch
-│   ├── db/             # Postgres pool
+│   ├── db/             # Postgres pool and Neon serverless client
 │   ├── ingest/         # Parse, normalise (IDF + franchises), similarity
 │   ├── recommend/      # Profile builder, scoring, display normalisation
 │   ├── eval/           # Recall / MRR evaluation harness
-│   └── api/            # Express server
+│   └── api/            # Express server (local) and Cloudflare Worker
 └── data/
     └── raw/            # Gzipped AniList JSON archive (gitignored)
 ```
@@ -154,7 +154,7 @@ manga-rec/
 - [ ] User comment profiling — parse a user's own AniList activity comments to infer preferences beyond scores
 - [ ] Manhwa / manhua filter — country-of-origin toggle (JP / KR / CN)
 - [ ] Anime adaptation links — surface when a recommended manga has an anime
-- [ ] Neon + Cloudflare deployment guide
+- [ ] Description embeddings as a third similarity channel
 
 ---
 
