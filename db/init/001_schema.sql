@@ -144,5 +144,4 @@ CREATE TABLE IF NOT EXISTS neighbours (
     score      real    NOT NULL,
     PRIMARY KEY (source_id, target_id)
 );
-
 CREATE INDEX neighbours_source_idx ON neighbours (source_id, score DESC);
