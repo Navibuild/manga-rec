@@ -37,6 +37,7 @@ function buildRingSVG(pct) {
 function buildCard(r) {
     const title = r.title_english || r.title_romaji || 'Unknown title';
     const genres = (r.genres || []).slice(0, 3).join(' · ');
+    const topTags = (r.top_tags || []).slice(0, 4);
     const because = r.because_of
         ? (r.because_of.title_english || r.because_of.title_romaji)
         : null;
@@ -56,6 +57,7 @@ function buildCard(r) {
         <div class="card-body">
           <h3 class="card-title">${title}</h3>
           ${genres ? `<p class="card-genres">${genres}</p>` : ''}
+          ${topTags.length ? `<div class="card-tags">${topTags.map(t => `<span class="card-tag">${t}</span>`).join('')}</div>` : ''}
           ${because ? `<p class="card-attribution">Because you liked <strong>${because}</strong></p>` : ''}
         </div>
       </a>

@@ -89,38 +89,77 @@ async function _recommend(username, weights, negative, excluded, db) {
         if (ranked.length >= TOP_RESULTS) break;
     }
 
-    const targetIds = ranked.map(([id])            => id);
+    const targetIds = ranked.map(([id]) => id);
     const attribIds = [...new Set(ranked.map(([, { sourceId }]) => sourceId))];
 
     // 7. Fetch full details
     const { rows: mediaDetails } = await db.query(`
-        SELECT
-            m.id,
-            m.title_romaji,
-            m.title_english,
-            m.cover_image_url,
-            m.site_url,
-            m.average_score,
-            m.popularity,
-            m.chapters,
-            m.status,
-            m.country_of_origin,
-            array_agg(DISTINCT g.name ORDER BY g.name)
-                FILTER (WHERE g.name IS NOT NULL) AS genres
-        FROM media m
-        LEFT JOIN media_genres mg ON mg.media_id = m.id
-        LEFT JOIN genres g        ON g.id        = mg.genre_id
-        WHERE m.id = ANY($1)
-        GROUP BY m.id
-    `, [targetIds]);
+    SELECT
+      m.id,
+      m.title_romaji,
+      m.title_english,
+      m.cover_image_url,
+      m.site_url,
+      m.average_score,
+      m.popularity,
+      m.chapters,
+      m.status,
+      m.country_of_origin,
+      array_agg(DISTINCT g.name ORDER BY g.name)
+        FILTER (WHERE g.name IS NOT NULL) AS genres
+    FROM media m
+    LEFT JOIN media_genres mg ON mg.media_id = m.id
+    LEFT JOIN genres g        ON g.id        = mg.genre_id
+    WHERE m.id = ANY($1)
+    GROUP BY m.id
+  `, [targetIds]);
 
     const { rows: sourceDetails } = await db.query(`
-        SELECT id, title_romaji, title_english FROM media WHERE id = ANY($1)
-    `, [attribIds]);
+    SELECT id, title_romaji, title_english FROM media WHERE id = ANY($1)
+  `, [attribIds]);
 
-    const mediaById  = Object.fromEntries(mediaDetails.map(m => [m.id, m]));
+    // Fetch top 5 IDF-weighted tags per candidate
+    // Fetch top 5 IDF-weighted tags per candidate
+    let tagRows = [];
+    try {
+        const tagResult = await db.query(`
+      SELECT media_id, array_agg(name ORDER BY score DESC) AS tags
+      FROM (
+        SELECT
+          mt.media_id,
+          t.name,
+          (mt.rank::float / 100 * COALESCE(t.idf_weight, 0)) AS score,
+          row_number() OVER (
+            PARTITION BY mt.media_id
+            ORDER BY (mt.rank::float / 100 * COALESCE(t.idf_weight, 0)) DESC
+          ) AS rn
+        FROM media_tags mt
+        JOIN tags t ON t.id = mt.tag_id
+        WHERE mt.media_id = ANY($1)
+          AND t.is_adult            = false
+          AND mt.is_general_spoiler = false
+          AND mt.is_media_spoiler   = false
+          AND COALESCE(t.idf_weight, 0) > 0
+          AND t.name NOT IN (
+            'Full Color', 'Long Strip', 'Adaptation', 'Official Colored',
+            'Web Comic', 'Doujinshi', 'Fan Colored', 'Anthology',
+            '4-Koma', 'Oneshot', 'Award Winning', 'Promotional'
+          )
+      ) sub
+      WHERE rn <= 5
+      GROUP BY media_id
+    `, [targetIds.length > 0 ? targetIds : [-1]]);
+        tagRows = tagResult.rows;
+    } catch (err) {
+        console.error('[recommend] tag query failed:', err.message);
+    }
+
+    const tagsByMediaId = Object.fromEntries(
+        tagRows.map(r => [r.media_id, r.tags || []])
+    );
+
+    const mediaById = Object.fromEntries(mediaDetails.map(m => [m.id, m]));
     const sourceById = Object.fromEntries(sourceDetails.map(m => [m.id, m]));
-
     // 8. Assemble output
     return ranked
         .map(([targetId, { score, sourceId }]) => {
@@ -140,6 +179,8 @@ async function _recommend(username, weights, negative, excluded, db) {
                 country_of_origin: media.country_of_origin,
                 genres:            media.genres || [],
                 raw_score:         score,
+                genres:            media.genres || [],
+                top_tags:          tagsByMediaId[media.id] || [],
                 because_of: source ? {
                     id:            source.id,
                     title_romaji:  source.title_romaji,

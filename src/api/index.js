@@ -3,7 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 
-const { recommend } = require('../recommend/profile');
+const { recommend, recommendFromEntries } = require('../recommend/profile');
 const { applyDisplayScores } = require('../recommend/score');
 const pool = require('../db/pool');
 
@@ -26,6 +26,43 @@ function cacheSet(key, data) {
 app.use(express.static(path.join(__dirname, '../../client')));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.use(express.json());
+
+app.post('/api/recommend', async (req, res) => {
+    const { username, scoreFormat, entries } = req.body || {};
+    if (!username || !entries || !scoreFormat) {
+        return res.status(400).json({ error: 'Invalid payload', code: 'BAD_REQUEST' });
+    }
+
+    const key = username.toLowerCase();
+    const cached = cacheGet(key);
+    if (cached) return res.json({ ...cached, cached: true });
+
+    try {
+        const raw = await recommendFromEntries(username, scoreFormat, entries, pool);
+        const results = applyDisplayScores(raw);
+        const payload = {
+            username,
+            results,
+            count: results.length,
+            generatedAt: new Date().toISOString(),
+            cached: false,
+        };
+        cacheSet(key, payload);
+        res.json(payload);
+    } catch (err) {
+        const statusMap = {
+            USER_NOT_FOUND: 404,
+            PRIVATE_LIST: 403,
+            EMPTY_LIST: 422,
+            INSUFFICIENT_DATA: 422,
+            NO_RESULTS: 422,
+        };
+        const status = statusMap[err.code] || 500;
+        console.error(`[api] ${err.code || 'ERROR'}: ${err.message}`);
+        res.status(status).json({ error: err.message, code: err.code || 'SERVER_ERROR' });
+    }
+});
 
 app.get('/api/recommend/:username', async (req, res) => {
     const username = req.params.username.trim();
